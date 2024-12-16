@@ -411,6 +411,9 @@ def get_sensor_readings():
   readings = get_board().get_sensor_readings(seconds_since_last, vbus_present)
   # readings["voltage"] = 0.0 # battery_voltage #Temporarily removed until issue is fixed
 
+  logging.info(f"current time: {now_str}")
+  logging.info(f"readings: {readings}")
+
   # write out the last time log
   with open("last_time.txt", "w") as timefile:
     timefile.write(now_str)  
