@@ -468,57 +468,67 @@ def upload_readings():
     logging.error(f"  - cannot upload readings, wifi connection failed")
     return False
 
-  destination = config.destination
+  successful_uploads = {}
+  destinations = config.destination.split("|")
+  
   try:
-    exec(f"import enviro.destinations.{destination}")
-    destination_module = sys.modules[f"enviro.destinations.{destination}"]
-    destination_module.log_destination()
+    for destination in destinations:
+      exec(f"import enviro.destinations.{destination}")
+      destination_module = sys.modules[f"enviro.destinations.{destination}"]
+      destination_module.log_destination()
 
-    for cache_file in os.ilistdir("uploads"):
-      try:
-        with open(f"uploads/{cache_file[0]}", "r") as upload_file:
-          status = destination_module.upload_reading(ujson.load(upload_file))
-          if status == UPLOAD_SUCCESS:
-            os.remove(f"uploads/{cache_file[0]}")
-            logging.info(f"  - uploaded {cache_file[0]}")
-          elif status == UPLOAD_RATE_LIMITED:
-            # write out that we want to attempt a reupload
-            with open("reattempt_upload.txt", "w") as attemptfile:
-              attemptfile.write("")
+      for cache_file in os.ilistdir("uploads"):
+        try:
+          with open(f"uploads/{cache_file[0]}", "r") as upload_file:
+            status = destination_module.upload_reading(ujson.load(upload_file))
+            if status == UPLOAD_SUCCESS:
+              if not cache_file[0] in successful_uploads:
+                successful_uploads[cache_file[0]] = 0
+              successful_uploads[cache_file[0]] += 1
+              logging.info(f"  - uploaded {cache_file[0]}")
+            elif status == UPLOAD_RATE_LIMITED:
+              # write out that we want to attempt a reupload
+              with open("reattempt_upload.txt", "w") as attemptfile:
+                attemptfile.write("")
 
-            logging.info(f"  - cannot upload '{cache_file[0]}' - rate limited")
-            sleep(1)
-          elif status == UPLOAD_LOST_SYNC:
-            # remove the sync time file to trigger a resync on next boot
-            if helpers.file_exists("sync_time.txt"):
-              os.remove("sync_time.txt")
-             
-            # write out that we want to attempt a reupload
-            with open("reattempt_upload.txt", "w") as attemptfile:
-              attemptfile.write("")
+              logging.info(f"  - cannot upload '{cache_file[0]}' - rate limited")
+              sleep(1)
+            elif status == UPLOAD_LOST_SYNC:
+              # remove the sync time file to trigger a resync on next boot
+              if helpers.file_exists("sync_time.txt"):
+                os.remove("sync_time.txt")
+               
+              # write out that we want to attempt a reupload
+              with open("reattempt_upload.txt", "w") as attemptfile:
+                attemptfile.write("")
 
-            logging.info(f"  - cannot upload '{cache_file[0]}' - rtc has become out of sync")
-            sleep(1)
-          elif status == UPLOAD_SKIP_FILE:
-            logging.error(f"  ! cannot upload '{cache_file[0]}' to {destination}. Skipping file")
-            warn_led(WARN_LED_BLINK)
-            continue
-          else:
-            logging.error(f"  ! failed to upload '{cache_file[0]}' to {destination}")
-            return False
+              logging.info(f"  - cannot upload '{cache_file[0]}' - rtc has become out of sync")
+              sleep(1)
+            elif status == UPLOAD_SKIP_FILE:
+              logging.error(f"  ! cannot upload '{cache_file[0]}' to {destination}. Skipping file")
+              warn_led(WARN_LED_BLINK)
+              continue
+            else:
+              logging.error(f"  ! failed to upload '{cache_file[0]}' to {destination}")
+              return False
 
-      except OSError:
-        logging.error(f"  ! failed to open '{cache_file[0]}'")
-        return False
+        except OSError:
+          logging.error(f"  ! failed to open '{cache_file[0]}'")
+          return False
 
-      except KeyError:
-        logging.error(f"  ! skipping '{cache_file[0]}' as it is missing data. It was likely created by an older version of the enviro firmware")
+        except KeyError:
+          logging.error(f"  ! skipping '{cache_file[0]}' as it is missing data. It was likely created by an older version of the enviro firmware")
         
   except ImportError:
     logging.error(f"! cannot find destination {destination}")
     return False
 
   finally:
+    # Clean up uploaded files
+    for f, successful_count in successful_uploads.items():
+      if successful_count == len(destinations):
+        os.remove(f"uploads/{f}")
+        logging.info(f"> deleted {f}")
     # Disconnect wifi
     import network
     logging.info("> Disconnecting wireless after upload")
