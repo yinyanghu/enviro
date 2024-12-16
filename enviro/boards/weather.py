@@ -3,7 +3,7 @@ from breakout_bme280 import BreakoutBME280
 from breakout_ltr559 import BreakoutLTR559
 from machine import Pin, PWM
 from pimoroni import Analog
-from enviro import i2c, activity_led
+from enviro import i2c, activity_led, config
 import enviro.helpers as helpers
 from phew import logging
 from enviro.constants import WAKE_REASON_RTC_ALARM, WAKE_REASON_BUTTON_PRESS
@@ -11,7 +11,7 @@ from enviro.constants import WAKE_REASON_RTC_ALARM, WAKE_REASON_BUTTON_PRESS
 # amount of rain required for the bucket to tip in mm
 RAIN_MM_PER_TICK = 0.2794
 
-# distance from the centre of the anemometer to the centre 
+# distance from the centre of the anemometer to the centre
 # of one of the cups in cm
 WIND_CM_RADIUS = 7.0
 # scaling factor for wind speed in m/s
@@ -55,7 +55,7 @@ def startup(reason):
     last_rain_trigger = True
 
     # if we were woken by the RTC or a Poke continue with the startup
-    return (reason is WAKE_REASON_RTC_ALARM 
+    return (reason is WAKE_REASON_RTC_ALARM
       or reason is WAKE_REASON_BUTTON_PRESS)
 
   # there was no rain trigger so continue with the startup
@@ -81,7 +81,7 @@ def check_trigger():
     rain_entries.append(helpers.datetime_string())
 
     # limit number of entries to 190 - each entry is 21 bytes including
-    # newline so this keeps the total rain.txt filesize just under one 
+    # newline so this keeps the total rain.txt filesize just under one
     # filesystem block (4096 bytes)
     rain_entries = rain_entries[-190:]
 
@@ -173,7 +173,7 @@ def rainfall(seconds_since_last):
           amount += RAIN_MM_PER_TICK
 
     os.remove("rain.txt")
-  
+
   per_second = 0
   if seconds_since_last > 0:
     per_second = amount / seconds_since_last
@@ -187,13 +187,22 @@ def get_sensor_readings(seconds_since_last, is_usb_power):
   time.sleep(0.1)
   bme280_data = bme280.read()
 
+  temperature = round(bme280_data[0], 2)
+  humidity = round(bme280_data[2], 2)
+
+  adjusted_temperature = temperature - config.usb_power_temperature_offset
+  absolute_humidity = helpers.relative_to_absolute_humidity(humidity, temperature)
+  humidity = helpers.absolute_to_relative_humidity(absolute_humidity, adjusted_temperature)
+  temperature = adjusted_temperature
+  humidity = round(humidity, 2)
+
   ltr_data = ltr559.get_reading()
   rain, rain_per_second = rainfall(seconds_since_last)
 
   from ucollections import OrderedDict
   return OrderedDict({
-    "temperature": round(bme280_data[0], 2),
-    "humidity": round(bme280_data[2], 2),
+    "temperature": temperature,
+    "humidity": humidity,
     "pressure": round(bme280_data[1] / 100.0, 2),
     "luminance": round(ltr_data[BreakoutLTR559.LUX], 2),
     "wind_speed": wind_speed(),
